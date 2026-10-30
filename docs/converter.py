@@ -14,7 +14,7 @@ def validate_output(sql):
  # Fail closed: the generated text must re-parse as exactly one statement PostgreSQL understands.
  trees=[t for t in sqlglot.parse(sql,read='postgres',error_level=ErrorLevel.RAISE) if t is not None]
  if len(trees)!=1: raise ValueError('Conversion produced an unexpected number of statements, so the result was withheld. Simplify the query and try again.')
- if isinstance(trees[0],exp.Command) or trees[0].find(exp.Command): raise ValueError('Conversion produced a statement that could not be validated as PostgreSQL. This query needs manual migration.')
+ if trees[0].find(exp.Command): raise ValueError('Conversion produced a statement that could not be validated as PostgreSQL. This query needs manual migration.')
  return trees[0]
 
 def convert(source, pretty=True):
@@ -23,7 +23,7 @@ def convert(source, pretty=True):
  trees=sqlglot.parse(source,read='oracle',error_level=ErrorLevel.RAISE)
  outputs=[];notes=[]
  for tree in trees:
-  if tree is None: continue
+  if tree is None or isinstance(tree,exp.Semicolon): continue  # a bare ';' (e.g. before a trailing comment) is not a statement
   if isinstance(tree,exp.Command): raise ValueError('This statement needs manual migration. Use SQL queries rather than PL/SQL blocks or SQL*Plus commands.')
   if tree.find(exp.Connect): raise ValueError('CONNECT BY needs a recursive CTE rewrite. This converter cannot safely infer that rewrite.')
   if any(c.name.upper()=='ROWNUM' for c in tree.find_all(exp.Column)):

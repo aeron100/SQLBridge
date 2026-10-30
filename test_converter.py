@@ -1,4 +1,4 @@
-import sys, pathlib, unittest
+import sys, pathlib, unittest, logging
 sys.path.insert(0,str(next(pathlib.Path('docs/vendor').glob('*.whl'))))
 sys.path.insert(0,'docs')
 from converter import convert
@@ -32,12 +32,25 @@ class ConverterTests(unittest.TestCase):
   r=convert('-- a /* b\nSELECT 1 FROM dual')
   bodies=[c for t in sqlglot.parse(r['sql'],read='postgres') if t is not None for n in t.walk() for c in (n.comments or [])]
   self.assertTrue(bodies);self.assertFalse([c for c in bodies if '/*' in c or '*/' in c],bodies)
+ def test_trailing_comment_after_last_statement(self):
+  r=convert('SELECT 1 FROM t;\n-- done')
+  stmts=[t for t in sqlglot.parse(r['sql'],read='postgres') if t is not None]
+  self.assertEqual(r['count'],1);self.assertEqual([type(t) for t in stmts],[exp.Select])
+ def test_ordinary_comment_preserved(self):
+  r=convert('-- keep me\nSELECT 1 FROM dual')
+  bodies=[c for t in sqlglot.parse(r['sql'],read='postgres') if t is not None for n in t.walk() for c in (n.comments or [])]
+  self.assertEqual([c.strip() for c in bodies],['keep me'])
+ def test_multi_statement_comment_payloads(self):
+  r=convert('SELECT 1 FROM dual -- a */ ; DROP TABLE a; /* b\n; SELECT 2 FROM dual -- c */ ; DROP TABLE c; /* d')
+  stmts=[t for t in sqlglot.parse(r['sql'],read='postgres') if t is not None]
+  self.assertEqual(r['count'],2);self.assertEqual([type(t) for t in stmts],[exp.Select,exp.Select])
  def test_output_check_rejects_multiple_statements(self):
   from converter import validate_output
   with self.assertRaises(ValueError):validate_output('SELECT 1; DROP TABLE t')
  def test_output_check_rejects_commands(self):
   from converter import validate_output
-  with self.assertLogs('sqlglot',level='WARNING'),self.assertRaises(ValueError):validate_output('VACUUM t')
+  logging.getLogger('sqlglot').setLevel(logging.ERROR);self.addCleanup(logging.getLogger('sqlglot').setLevel,logging.NOTSET)
+  with self.assertRaises(ValueError):validate_output('VACUUM t')
  def test_output_check_accepts_single_statement(self):
   from converter import validate_output
   validate_output('SELECT 1')
