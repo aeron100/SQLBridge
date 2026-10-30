@@ -4,6 +4,19 @@ from sqlglot import exp
 from sqlglot.errors import ErrorLevel
 from sqlglot.transforms import eliminate_join_marks
 
+def sanitize_comments(tree):
+ # Comments are re-emitted as /* ... */ blocks, so a delimiter inside a body would end the
+ # comment early (and PostgreSQL nests block comments). Neutralize both delimiters.
+ for node in tree.walk():
+  if node.comments: node.comments=[c.replace('*/','* /').replace('/*','/ *') for c in node.comments]
+
+def validate_output(sql):
+ # Fail closed: the generated text must re-parse as exactly one statement PostgreSQL understands.
+ trees=[t for t in sqlglot.parse(sql,read='postgres',error_level=ErrorLevel.RAISE) if t is not None]
+ if len(trees)!=1: raise ValueError('Conversion produced an unexpected number of statements, so the result was withheld. Simplify the query and try again.')
+ if isinstance(trees[0],exp.Command) or trees[0].find(exp.Command): raise ValueError('Conversion produced a statement that could not be validated as PostgreSQL. This query needs manual migration.')
+ return trees[0]
+
 def convert(source, pretty=True):
  if not source.strip(): return {'sql':'','notes':[], 'count':0}
  if len(source)>150000: raise ValueError('Please use a query smaller than 150,000 characters.')
@@ -29,7 +42,8 @@ def convert(source, pretty=True):
      notes.append('Removed Oracle’s DUAL pseudo-table.')
   unknown=sorted({n.name for n in tree.find_all(exp.Anonymous)})
   if unknown:notes.append('Check these functions in your PostgreSQL environment: '+', '.join(unknown)+'. Custom and Oracle-specific functions may need manual replacements.')
+  sanitize_comments(tree)
   result=tree.sql(dialect='postgres',pretty=pretty,unsupported_level=ErrorLevel.RAISE)
-  sqlglot.parse(result,read='postgres',error_level=ErrorLevel.RAISE)
+  validate_output(result)
   outputs.append(result.rstrip(';')+';')
  return {'sql':'\n\n'.join(outputs),'notes':list(dict.fromkeys(notes)), 'count':len(outputs)}
